@@ -1,2 +1,2 @@
-# Hostile Waters binary model file (n,c,r) to .OB3 converter
+# Hostile Waters binary model file (n,c,r) to .OBJ converter
 Uses Visual studio 2019
