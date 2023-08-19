@@ -17,6 +17,9 @@ string GetFileName(string const& path)
 
 void WriteObjFile(vector<ObjObject> objects, string objFilePath, string texturesFilepath)
 {
+    if (objects.size() == 0)
+        return;
+
     try
     {
         string output = "";

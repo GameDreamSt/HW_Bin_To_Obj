@@ -37,6 +37,10 @@ ObjObject::ObjObject()
 	name = "";
 }
 
+void ObjObject::Save(Object loadedObj)
+{
+}
+
 Vertex2D::Vertex2D()
 {
 	u = v = x = y = z = 0;
@@ -296,7 +300,7 @@ bool ObjBlock::Load(vector<unsigned char>& allData, int& index)
 
 	StaticTM.Load(allData, index);
 
-	Size = RReadUInt(allData, index); index += 4;
+	Size = RReadFloat(allData, index); index += 4;
 
 	FirstVert = RReadULong(allData, index); index += 4;
 	NumVerts = RReadULong(allData, index); index += 4;
@@ -393,4 +397,245 @@ bool SuperObjBlock::Load(vector<unsigned char>& allData, int& index, unsigned lo
 	}
 
 	return true;
+}
+
+#define ReadData(x) memcpy(&x, &bytes[cursor], sizeof(x)); cursor += sizeof(x);
+
+const float modelScaleDown = 0.0225f;
+
+void Object::Load(vector<unsigned char>& bytes, int& cursor)
+{
+	unsigned int i;
+	unsigned int vertexSize = sizeof(Vertex); // 16
+	unsigned int lightVertSize = sizeof(LightVert); // 48
+
+	unsigned long nameLength; ReadData(nameLength);
+
+	char* Name = (char*)(&bytes[cursor]); // s01 file path in local dir
+	cursor += nameLength + 1;
+	name = string(Name);
+
+	ReadData(numberOfVerts);
+
+	for (i = 0; i < numberOfVerts; i++)
+	{
+		TransVert tVert{};
+		tVert.V = *(Vertex*)(&bytes[cursor]);
+		tVert.V.x *= -modelScaleDown;
+		tVert.V.y *= modelScaleDown;
+		tVert.V.z *= modelScaleDown;
+		cursor += vertexSize;
+		verts.push_back(tVert);
+	}
+
+	ReadData(numberOfLVerts);
+	ReadData(numberOfBaseVerts);
+	ReadData(numberOfCurrVerts);
+
+	for (i = 0; i < numberOfLVerts; i++)
+	{
+		LightVert newVert{};
+
+		Vertex vec = *(Vertex*)(&bytes[cursor]);
+		cursor += vertexSize;
+		newVert.N = vec;
+
+		ReadData(newVert.VIndex);
+		newVert.TV = &verts[newVert.VIndex];
+
+		lightVerts.push_back(newVert);
+	}
+
+	ReadData(numBlocks);
+	ReadData(animFrames);
+
+	memcpy(instanceLongs, &bytes[cursor], sizeof(unsigned long) * BASE_OBJECT_SPECIFIC_DATA_COUNT);
+	cursor += BASE_OBJECT_SPECIFIC_DATA_COUNT * 4;
+
+	memcpy(instanceFloats, &bytes[cursor], sizeof(float) * BASE_OBJECT_SPECIFIC_DATA_COUNT);
+	cursor += BASE_OBJECT_SPECIFIC_DATA_COUNT * 4;
+
+	ReadData(size);
+
+	ReadData(vertMin);
+	ReadData(vertMax);
+	ReadData(staticTMOffset);
+
+	ReadData(boundingCentreOffset);
+	ReadData(boundingBoxExtents);
+	ReadData(smallBoundingBoxScale);
+	ReadData(recipBoundingBoxExtents);
+
+	ReadData(boundingSphereRadius);
+
+	objFaceList.resize(MAX_FACELISTS);
+
+	for (i = 0; i < MAX_FACELISTS; i++)
+	{
+		int FLValid; ReadData(FLValid);
+
+		if (FLValid > 1) // Skip weird rubbish bytes
+		{
+			i--;
+			continue;
+		}
+
+		if (FLValid)
+		{
+			switch (i)
+			{
+			case FACES_BUMP:
+				break;
+			case FACES_TEXTURE:
+				objFaceList[FACES_TEXTURE] = new TextureFaceList();
+				break;
+			case FACES_REFLECT:
+				objFaceList[FACES_REFLECT] = new EnvironmentMap();
+				break;
+			}
+		}
+	}
+
+	for (i = 0; i < MAX_FACELISTS; i++)
+		if (objFaceList[i])
+			objFaceList[i]->Load(bytes, cursor);
+
+
+	// ************************
+	// Object load end
+	// Start matrix object load
+
+	MatBlocks.resize(numBlocks);
+
+	for (i = 0; i < numBlocks; i++)
+		MatBlocks[i].Load(bytes, cursor, animFrames);
+}
+
+vector<ObjObject> Object::ConvertToObj()
+{
+	vector<ObjObject> objects;
+
+	if (objFaceList[1] == nullptr)
+	{
+		printf("Can't convert this model because it has no faces/tris!\n");
+		return objects;
+	}
+
+	//cout << lightVerts.size() << '\n';
+
+	int realVertCount = 0;
+	for (unsigned long i = 0; i < numBlocks; i++)
+	{
+		int startVert = MatBlocks[i].FirstVert;
+		int endVert = startVert + MatBlocks[i].NumVerts;
+		realVertCount += endVert - startVert;
+	}
+
+	for (unsigned long i = 0; i < numBlocks; i++) // numBlocks assumed as => Number of name, vert, Tvert, quads, tris objects
+	{
+		ObjBlock* blockData = &MatBlocks[i];
+		ObjObject newObj;
+
+		newObj.name = blockData->Name;
+
+		newObj.frameAnimStart = 0;
+
+		newObj.position = Vector3(blockData->StaticTM.t.x, blockData->StaticTM.t.y, blockData->StaticTM.t.z);
+		newObj.position *= modelScaleDown;
+
+		int startVert = blockData->FirstVert;
+		int endVert = startVert + blockData->NumVerts;
+
+		for (; startVert < endVert; startVert++)
+			newObj.verts.push_back(Vector3(verts[startVert].V.x, verts[startVert].V.y, verts[startVert].V.z));
+
+		TextureFaceList* textureFaceList = (TextureFaceList*)(objFaceList[1]);
+		TextureBlockInfo* texInfoBlock = &(textureFaceList->Info[i]);
+
+		int startQuad = texInfoBlock->List[0].FirstQuad;
+		int endQuad = startQuad + texInfoBlock->List[0].NumQuads;
+
+		//cout << '\n';
+
+		for (; startQuad < endQuad; startQuad++)
+		{
+			Quad newQuad;
+
+			TextureQuad* TQuad = &(textureFaceList->Quads[startQuad]);
+			newQuad.textureName = texInfoBlock->name;
+
+			int lvFisrt = blockData->FirstLVert;
+			newQuad.vertIds[0] = lightVerts[(size_t)TQuad->a + lvFisrt].VIndex + 1;
+			newQuad.vertIds[1] = lightVerts[(size_t)TQuad->b + lvFisrt].VIndex + 1;
+			newQuad.vertIds[2] = lightVerts[(size_t)TQuad->c + lvFisrt].VIndex + 1;
+			newQuad.vertIds[3] = lightVerts[(size_t)TQuad->d + lvFisrt].VIndex + 1;
+
+			if (newQuad.vertIds[0] > realVertCount || newQuad.vertIds[1] > realVertCount || newQuad.vertIds[2] > realVertCount || newQuad.vertIds[3] > realVertCount)
+			{
+				newQuad.vertIds[0] = lightVerts[TQuad->a].VIndex + 1;
+				newQuad.vertIds[1] = lightVerts[TQuad->b].VIndex + 1;
+				newQuad.vertIds[2] = lightVerts[TQuad->c].VIndex + 1;
+				newQuad.vertIds[3] = lightVerts[TQuad->d].VIndex + 1;
+				//cout << "Vert ID vent out of vert array range!\n";
+			}
+
+			//cout << newQuad.vertIds[0] << ' ' << newQuad.vertIds[1] << ' ' << newQuad.vertIds[2] << ' ' << newQuad.vertIds[3] << '\n';
+
+			if (newObj.textureFilenames.size() == 0 && texInfoBlock->name.size() > 0)
+				newObj.textureFilenames.push_back(texInfoBlock->name);
+
+			newObj.texVerts.push_back(pair<float, float>(TQuad->TVert[0].u, 1 - TQuad->TVert[0].v));
+			newQuad.texVertIds[0] = (int)newObj.texVerts.size();
+			newObj.texVerts.push_back(pair<float, float>(TQuad->TVert[1].u, 1 - TQuad->TVert[1].v));
+			newQuad.texVertIds[1] = (int)newObj.texVerts.size();
+			newObj.texVerts.push_back(pair<float, float>(TQuad->TVert[2].u, 1 - TQuad->TVert[2].v));
+			newQuad.texVertIds[2] = (int)newObj.texVerts.size();
+			newObj.texVerts.push_back(pair<float, float>(TQuad->TVert[3].u, 1 - TQuad->TVert[3].v));
+			newQuad.texVertIds[3] = (int)newObj.texVerts.size();
+
+			newObj.quads.push_back(newQuad);
+		}
+
+		//cout << '\n';
+
+		int startTri = texInfoBlock->List[0].FirstTri;
+		int endTri = startTri + texInfoBlock->List[0].NumTris;
+
+		for (; startTri < endTri; startTri++)
+		{
+			Tris newTris;
+
+			TextureTri* TTri = &(textureFaceList->Tris[startTri]);
+			newTris.textureName = texInfoBlock->name;
+
+			int lvFisrt = blockData->FirstLVert;
+			newTris.vertIds[0] = lightVerts[(size_t)TTri->a + lvFisrt].VIndex + 1;
+			newTris.vertIds[1] = lightVerts[(size_t)TTri->b + lvFisrt].VIndex + 1;
+			newTris.vertIds[2] = lightVerts[(size_t)TTri->c + lvFisrt].VIndex + 1;
+
+			if (newTris.vertIds[0] > realVertCount || newTris.vertIds[1] > realVertCount || newTris.vertIds[2] > realVertCount)
+			{
+				newTris.vertIds[0] = lightVerts[TTri->a].VIndex + 1;
+				newTris.vertIds[1] = lightVerts[TTri->b].VIndex + 1;
+				newTris.vertIds[2] = lightVerts[TTri->c].VIndex + 1;
+				//cout << "Vert ID vent out of vert array range!\n";
+			}
+
+			if (newObj.textureFilenames.size() == 0 && texInfoBlock->name.size() > 0)
+				newObj.textureFilenames.push_back(texInfoBlock->name);
+
+			newObj.texVerts.push_back(pair<float, float>(TTri->TVert[0].u, 1 - TTri->TVert[0].v));
+			newTris.texVertIds[0] = (int)newObj.texVerts.size();
+			newObj.texVerts.push_back(pair<float, float>(TTri->TVert[1].u, 1 - TTri->TVert[1].v));
+			newTris.texVertIds[1] = (int)newObj.texVerts.size();
+			newObj.texVerts.push_back(pair<float, float>(TTri->TVert[2].u, 1 - TTri->TVert[2].v));
+			newTris.texVertIds[2] = (int)newObj.texVerts.size();
+
+			newObj.tris.push_back(newTris);
+		}
+
+		objects.push_back(newObj);
+	}
+
+	return objects;
 }

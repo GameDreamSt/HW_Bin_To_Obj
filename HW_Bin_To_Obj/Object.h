@@ -6,6 +6,8 @@
 
 using namespace std;
 
+class Object;
+
 class Quad
 {
 public:
@@ -64,6 +66,8 @@ public:
     vector<Tris> tris;
 
     vector<string> textureFilenames;
+
+    void Save(Object loadedObj);
 };
 
 #define	BASE_OBJECT_SPECIFIC_DATA_COUNT	64
@@ -112,6 +116,10 @@ public:
         ContactInf ContactInfo;
         ExtraVertInf inf;
     };
+
+    Vertex() { x = 0; y = 0; z = 0; w = 0; }
+    Vertex(float X, float Y, float Z) { x = X; y = Y; z = Z; w = 0; }
+    Vertex(float X, float Y, float Z, float W) { x = X; y = Y; z = Z; w = W; }
 };
 
 class ScreenVertex
@@ -382,4 +390,42 @@ public:
     bool Load(vector<unsigned char>& allData, int& index, unsigned long AnimFrames);
 
     SuperObjBlock() : ObjBlock(), numKeyVerts(0), numKeyFrames(0){};
+};
+
+class Object
+{
+public:
+    string name = "";
+
+    vector<TransVert> verts;
+    vector<LightVert> lightVerts;
+    vector<SuperObjBlock> MatBlocks;
+
+    unsigned int numberOfVerts = 0;
+    unsigned long numberOfLVerts = 0;
+    unsigned long numberOfBaseVerts = 0;
+    unsigned long numberOfCurrVerts = 0;
+    unsigned long numBlocks = 0;
+    unsigned long animFrames = 0;
+
+    unsigned long instanceLongs[BASE_OBJECT_SPECIFIC_DATA_COUNT]{};
+    float instanceFloats[BASE_OBJECT_SPECIFIC_DATA_COUNT]{};
+
+    float size = 0;
+
+    Vertex vertMin;
+    Vertex vertMax;
+    Vertex staticTMOffset;
+
+    Vertex boundingCentreOffset;
+    Vertex boundingBoxExtents;
+    Vertex smallBoundingBoxScale;
+    Vertex recipBoundingBoxExtents;
+
+    float boundingSphereRadius = 0;
+
+    vector<FaceList*> objFaceList;
+
+    void Load(vector<unsigned char> &bytes, int &cursor);
+    vector<ObjObject> ConvertToObj();
 };

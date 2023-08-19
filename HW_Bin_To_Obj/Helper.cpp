@@ -1,6 +1,25 @@
 
 #include <Helper.h>
 
+string GoUpLevel(string path)
+{
+    return path.substr(0, path.find_last_of('\\'));
+}
+
+string RemoveQuotes(string path)
+{
+    if (path.length() < 2)
+        return path;
+
+    if (path[0] == '"')
+        path = path.erase(0);
+
+    if (path[path.length() - 1] == '"')
+        path = path.erase(path.length() - 1);
+
+    return path;
+}
+
 string exePathCache = "";
 string GetExePath()
 {
