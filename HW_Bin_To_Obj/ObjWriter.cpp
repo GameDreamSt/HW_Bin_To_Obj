@@ -39,11 +39,17 @@ void WriteObjFile(vector<ObjObject> objects, string objFilePath, string textures
             vector<string>::iterator it = unique(textures.begin(), textures.end());
             textures.resize(std::distance(textures.begin(), it));
 
+            for (size_t i = 0; i < textures.size(); i++)
+                replace(textures[i].begin(), textures[i].end(), ' ', '_');
+
             for (int i = 0; i < textures.size(); i++)
             {
-                output += "newmtl material_" + textures[i].substr(0, textures[i].length() - 4) + '\n';
+                string texFileName = textures[i].substr(0, textures[i].length() - 4);
+                
+                output += "newmtl material_" + texFileName + '\n';
                 output += "Ns 0.000000\nKa 1.000000 1.000000 1.000000\nKd 1.000000 1.000000 1.000000\nKs 0.000000 0.000000 0.000000\nKe 0.000000 0.000000 0.000000\nNi 1.450000\nd 1.000000\nillum 1\n";
-                output += "map_Kd " + texturesFilepath + textures[i].substr(0, textures[i].length() - 4) + ".png\n\n";
+                
+                output += "map_Kd " + texturesFilepath + texFileName + ".png\n\n";
             }
 
             string mtlPath = objFilePath.substr(0, objFilePath.length() - 3) + "mtl";
@@ -77,6 +83,7 @@ void WriteObjFile(vector<ObjObject> objects, string objFilePath, string textures
             if (hasAnyTextures && objects[i].textureFilenames.size() > 0)
             {
                 string name = objects[i].textureFilenames[0];
+                replace(name.begin(), name.end(), ' ', '_');
                 output += "usemtl material_" + name.substr(0, name.length() - 4) + "\n";
             }
 
